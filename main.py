@@ -23,41 +23,7 @@ bad_words = load_words()
 # админ (твой user_id)
 ADMIN_ID = None  # позже можно закрепить
 
-async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Напиши слово: /add слово")
-
-    word = context.args[0].lower()
-    bad_words.add(word)
-    save_words(bad_words)
-
-    await update.message.reply_text(f"Добавил слово: {word}")
-
-async def remove_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args:
-        return await update.message.reply_text("Напиши слово: /remove слово")
-
-    word = context.args[0].lower()
-    bad_words.discard(word)
-    save_words(bad_words)
-
-    await update.message.reply_text(f"Удалил слово: {word}")
-
-async def list_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not bad_words:
-        return await update.message.reply_text("Список пуст")
-
-    await update.message.reply_text("\n".join(sorted(bad_words)))
-
-async def mute_user(context, chat_id, user_id):
-    await context.bot.restrict_chat_member(
-        chat_id,
-        user_id,
-        permissions={"can_send_messages": False},
-        until_date=None
-    )
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update, context):
     if not update.message or not update.message.text:
         return
 
@@ -65,29 +31,36 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for word in bad_words:
         if word in text:
+
+            chat_id = update.effective_chat.id
+            user_id = update.effective_user.id
+
+            # 1. удалить сообщение пользователя
             await update.message.delete()
 
+            # 2. отправить сообщение в чат (ВАЖНО: СНАЧАЛА отправляем)
+            warning = await context.bot.send_message(
+                chat_id=chat_id,
+                text="🚫 Давайте без мата!\nВам 1 минута молчания в чате."
+            )
+
+            # 3. мут на 1 минуту
             await context.bot.restrict_chat_member(
-                update.effective_chat.id,
-                update.effective_user.id,
+                chat_id,
+                user_id,
                 permissions={
                     "can_send_messages": False,
                     "can_send_media_messages": False,
                     "can_send_polls": False,
                     "can_send_other_messages": False,
                     "can_add_web_page_previews": False
-                },
-                until_date=None
+                }
             )
 
-            msg = await update.message.reply_text(
-                "⚠️ Давайте без мата!"
-            )
-
-            # удалить сообщение через 30 сек
+            # 4. удалить предупреждение через 30 секунд
             import asyncio
             await asyncio.sleep(30)
-            await msg.delete()
+            await warning.delete()
 
             return
 
