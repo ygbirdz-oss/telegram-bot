@@ -21,7 +21,7 @@ from telegram.ext import (
 TOKEN = os.getenv("TOKEN")
 
 BADWORDS_FILE = "badwords.txt"
-ADMIN_ID = 123456789  # 👈 вставь свой ID
+ADMIN_ID = hikvrii  # 👈 вставь свой ID
 
 # -----------------------
 # ДАННЫЕ
