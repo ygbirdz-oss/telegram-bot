@@ -1,7 +1,10 @@
 import os
 import asyncio
 import re
+import threading
 from collections import defaultdict
+
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import (
     Update,
@@ -18,22 +21,44 @@ from telegram.ext import (
     filters
 )
 
+# =======================
+# CONFIG
+# =======================
+
 TOKEN = os.getenv("TOKEN")
+ADMIN_ID = 123456789  # 👈 ВСТАВЬ СВОЙ ID
 
 BADWORDS_FILE = "badwords.txt"
-ADMIN_ID = hikvrii  # 👈 вставь свой ID
 
-# -----------------------
-# ДАННЫЕ
-# -----------------------
+# =======================
+# FAKE WEB SERVER (FIX RENDER PORT ERROR)
+# =======================
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_web).start()
+
+# =======================
+# DATA
+# =======================
 
 bad_words = set()
 warnings = defaultdict(int)
 user_stats = defaultdict(int)
 
-# -----------------------
-# ЗАГРУЗКА СЛОВ
-# -----------------------
+# =======================
+# LOAD WORDS
+# =======================
 
 def load_words():
     if not os.path.exists(BADWORDS_FILE):
@@ -48,18 +73,18 @@ def save_words(words):
 
 bad_words = load_words()
 
-# -----------------------
-# НОРМАЛИЗАЦИЯ
-# -----------------------
+# =======================
+# NORMALIZE TEXT
+# =======================
 
 def normalize(text: str):
     text = text.lower()
     text = re.sub(r"[^a-zа-яё0-9]", "", text)
     return text
 
-# -----------------------
-# ГЛАВНОЕ МЕНЮ
-# -----------------------
+# =======================
+# PANEL
+# =======================
 
 async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -80,11 +105,12 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-# -----------------------
-# CALLBACK КНОПКИ
-# -----------------------
+# =======================
+# CALLBACK BUTTONS
+# =======================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
 
@@ -93,27 +119,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     data = query.data
 
-    # ➕ ДОБАВИТЬ
     if data == "add_word":
-        await query.message.reply_text("✏️ Напиши слово для добавления:")
         context.user_data["mode"] = "add"
+        await query.message.reply_text("✏️ Напиши слово для ДОБАВЛЕНИЯ")
 
-    # ➖ УДАЛИТЬ
     elif data == "remove_word":
-        await query.message.reply_text("✏️ Напиши слово для удаления:")
         context.user_data["mode"] = "remove"
+        await query.message.reply_text("✏️ Напиши слово для УДАЛЕНИЯ")
 
-    # 📃 СПИСОК
     elif data == "list_words":
         text = "\n".join(sorted(bad_words)) if bad_words else "Список пуст"
         await query.message.reply_text(text)
 
-    # 📊 СТАТИСТИКА
     elif data == "stats":
         text = f"👥 Пользователей с нарушениями: {len(warnings)}"
         await query.message.reply_text(text)
 
-    # 🏆 ТОП
     elif data == "top":
         top = sorted(warnings.items(), key=lambda x: x[1], reverse=True)[:10]
 
@@ -121,15 +142,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Нет нарушений")
             return
 
-        text = "🏆 Топ нарушителей:\n"
+        text = "🏆 ТОП нарушителей:\n"
         for user_id, count in top:
             text += f"{user_id} — {count}\n"
 
         await query.message.reply_text(text)
 
-# -----------------------
-# ТЕКСТОВЫЙ ВВОД (КНОПКИ)
-# -----------------------
+# =======================
+# TEXT INPUT (ADD/REMOVE MODE)
+# =======================
 
 async def text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -137,7 +158,6 @@ async def text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     mode = context.user_data.get("mode")
-
     if not mode:
         return
 
@@ -155,9 +175,9 @@ async def text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["mode"] = None
 
-# -----------------------
-# АНТИ-МАТ
-# -----------------------
+# =======================
+# ANTI-MAT SYSTEM
+# =======================
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -176,13 +196,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             warnings[user_id] += 1
             user_stats[user_id] += 1
 
-            await update.message.delete()
+            try:
+                await update.message.delete()
+            except:
+                pass
 
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="🚫 Без мата!\n⏳ Мут 60 секунд."
+                text="🚫 Без мата!\n⏳ Мут на 60 секунд."
             )
 
+            # mute
             await context.bot.restrict_chat_member(
                 chat_id,
                 user_id,
@@ -195,7 +219,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             )
 
-            # 60 минут мут после 3 нарушений
+            # 3 strikes → 60 min mute
             if warnings[user_id] >= 3:
 
                 await context.bot.send_message(
@@ -236,9 +260,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             return
 
-# -----------------------
-# ЗАПУСК
-# -----------------------
+# =======================
+# START BOT
+# =======================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
