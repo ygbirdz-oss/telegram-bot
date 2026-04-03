@@ -2,16 +2,10 @@ import os
 import asyncio
 import re
 import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from collections import defaultdict
 
-from http.server import BaseHTTPRequestHandler, HTTPServer
-
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
-
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -21,18 +15,19 @@ from telegram.ext import (
     filters
 )
 
-# =======================
+# =========================
 # CONFIG
-# =======================
+# =========================
 
 TOKEN = os.getenv("TOKEN")
-ADMIN_ID = 123456789  # 👈 ВСТАВЬ СВОЙ ID
+
+ADMIN_ID = 388777732  # ✅ твой ID
 
 BADWORDS_FILE = "badwords.txt"
 
-# =======================
-# FAKE WEB SERVER (FIX RENDER PORT ERROR)
-# =======================
+# =========================
+# RENDER KEEP-ALIVE PORT
+# =========================
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -48,17 +43,17 @@ def run_web():
 
 threading.Thread(target=run_web).start()
 
-# =======================
+# =========================
 # DATA
-# =======================
+# =========================
 
 bad_words = set()
 warnings = defaultdict(int)
-user_stats = defaultdict(int)
+context_state = {}
 
-# =======================
-# LOAD WORDS
-# =======================
+# =========================
+# LOAD / SAVE WORDS
+# =========================
 
 def load_words():
     if not os.path.exists(BADWORDS_FILE):
@@ -73,18 +68,18 @@ def save_words(words):
 
 bad_words = load_words()
 
-# =======================
+# =========================
 # NORMALIZE TEXT
-# =======================
+# =========================
 
 def normalize(text: str):
     text = text.lower()
     text = re.sub(r"[^a-zа-яё0-9]", "", text)
     return text
 
-# =======================
+# =========================
 # PANEL
-# =======================
+# =========================
 
 async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -92,22 +87,20 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = [
-        [InlineKeyboardButton("➕ Добавить слово", callback_data="add_word")],
-        [InlineKeyboardButton("➖ Удалить слово", callback_data="remove_word")],
-        [InlineKeyboardButton("📃 Список слов", callback_data="list_words")],
+        [InlineKeyboardButton("➕ Добавить слово", callback_data="add")],
+        [InlineKeyboardButton("➖ Удалить слово", callback_data="remove")],
+        [InlineKeyboardButton("📃 Список слов", callback_data="list")],
         [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
-        [InlineKeyboardButton("🏆 Топ нарушителей", callback_data="top")],
     ]
 
     await update.message.reply_text(
-        "🎛 <b>Панель управления ботом</b>",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="HTML"
+        "🎛 Панель управления",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# =======================
-# CALLBACK BUTTONS
-# =======================
+# =========================
+# BUTTONS
+# =========================
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -117,84 +110,67 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.from_user.id != ADMIN_ID:
         return
 
-    data = query.data
+    uid = query.from_user.id
 
-    if data == "add_word":
-        context.user_data["mode"] = "add"
-        await query.message.reply_text("✏️ Напиши слово для ДОБАВЛЕНИЯ")
+    if query.data == "add":
+        context_state[uid] = "add"
+        await query.message.reply_text("✏️ Отправь слово для ДОБАВЛЕНИЯ")
 
-    elif data == "remove_word":
-        context.user_data["mode"] = "remove"
-        await query.message.reply_text("✏️ Напиши слово для УДАЛЕНИЯ")
+    elif query.data == "remove":
+        context_state[uid] = "remove"
+        await query.message.reply_text("✏️ Отправь слово для УДАЛЕНИЯ")
 
-    elif data == "list_words":
-        text = "\n".join(sorted(bad_words)) if bad_words else "Список пуст"
-        await query.message.reply_text(text)
+    elif query.data == "list":
+        await query.message.reply_text("\n".join(sorted(bad_words)) or "Список пуст")
 
-    elif data == "stats":
-        text = f"👥 Пользователей с нарушениями: {len(warnings)}"
-        await query.message.reply_text(text)
+    elif query.data == "stats":
+        await query.message.reply_text(f"📊 Нарушителей: {len(warnings)}")
 
-    elif data == "top":
-        top = sorted(warnings.items(), key=lambda x: x[1], reverse=True)[:10]
+# =========================
+# MAIN LOGIC
+# =========================
 
-        if not top:
-            await query.message.reply_text("Нет нарушений")
-            return
-
-        text = "🏆 ТОП нарушителей:\n"
-        for user_id, count in top:
-            text += f"{user_id} — {count}\n"
-
-        await query.message.reply_text(text)
-
-# =======================
-# TEXT INPUT (ADD/REMOVE MODE)
-# =======================
-
-async def text_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    mode = context.user_data.get("mode")
-    if not mode:
-        return
-
-    word = update.message.text.lower().strip()
-
-    if mode == "add":
-        bad_words.add(word)
-        save_words(bad_words)
-        await update.message.reply_text(f"➕ Добавлено: {word}")
-
-    elif mode == "remove":
-        bad_words.discard(word)
-        save_words(bad_words)
-        await update.message.reply_text(f"➖ Удалено: {word}")
-
-    context.user_data["mode"] = None
-
-# =======================
-# ANTI-MAT SYSTEM
-# =======================
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not update.message or not update.message.text:
         return
 
-    user = update.effective_user
+    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
-    user_id = user.id
+    text_raw = update.message.text
 
-    text = normalize(update.message.text)
+    # =========================
+    # ADMIN WORD INPUT
+    # =========================
+
+    if user_id == ADMIN_ID and user_id in context_state:
+
+        mode = context_state[user_id]
+        word = text_raw.lower().strip()
+
+        if mode == "add":
+            bad_words.add(word)
+            save_words(bad_words)
+            await update.message.reply_text(f"➕ Добавлено: {word}")
+
+        elif mode == "remove":
+            bad_words.discard(word)
+            save_words(bad_words)
+            await update.message.reply_text(f"➖ Удалено: {word}")
+
+        del context_state[user_id]
+        return
+
+    # =========================
+    # ANTI-MAT
+    # =========================
+
+    text = normalize(text_raw)
 
     for word in bad_words:
         if word in text:
 
             warnings[user_id] += 1
-            user_stats[user_id] += 1
 
             try:
                 await update.message.delete()
@@ -203,10 +179,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="🚫 Без мата!\n⏳ Мут на 60 секунд."
+                text="🚫 Без мата!\n⏳ Мут на 60 секунд"
             )
 
-            # mute
+            # mute 60 sec
             await context.bot.restrict_chat_member(
                 chat_id,
                 user_id,
@@ -219,31 +195,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             )
 
-            # 3 strikes → 60 min mute
-            if warnings[user_id] >= 3:
-
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text="⛔ 3 нарушения → мут 60 минут"
-                )
-
-                await asyncio.sleep(3600)
-
-                await context.bot.restrict_chat_member(
-                    chat_id,
-                    user_id,
-                    permissions={
-                        "can_send_messages": True,
-                        "can_send_media_messages": True,
-                        "can_send_polls": True,
-                        "can_send_other_messages": True,
-                        "can_add_web_page_previews": True
-                    }
-                )
-
-                warnings[user_id] = 0
-                return
-
+            # auto unmute
             await asyncio.sleep(60)
 
             await context.bot.restrict_chat_member(
@@ -260,15 +212,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             return
 
-# =======================
-# START BOT
-# =======================
+# =========================
+# APP START
+# =========================
 
 app = ApplicationBuilder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("panel", panel))
 app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_input))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
 
 app.run_polling()
