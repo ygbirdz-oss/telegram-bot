@@ -5,7 +5,7 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from collections import defaultdict
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -20,13 +20,11 @@ from telegram.ext import (
 # =========================
 
 TOKEN = os.getenv("TOKEN")
-
-ADMIN_ID = 388777732  # ✅ твой ID
-
+ADMIN_ID = 388777732
 BADWORDS_FILE = "badwords.txt"
 
 # =========================
-# RENDER KEEP-ALIVE PORT
+# KEEP ALIVE (Render)
 # =========================
 
 def run_web():
@@ -69,13 +67,34 @@ def save_words(words):
 bad_words = load_words()
 
 # =========================
-# NORMALIZE TEXT
+# NORMALIZE
 # =========================
 
 def normalize(text: str):
     text = text.lower()
     text = re.sub(r"[^a-zа-яё0-9]", "", text)
     return text
+
+# =========================
+# DELETE BOT MESSAGE
+# =========================
+
+async def delete_later(context, chat_id, message_id, delay):
+    await asyncio.sleep(delay)
+    try:
+        await context.bot.delete_message(chat_id, message_id)
+    except:
+        pass
+
+# =========================
+# COMMAND MENU
+# =========================
+
+async def set_commands(app):
+    commands = [
+        BotCommand("panel", "Открыть панель управления"),
+    ]
+    await app.bot.set_my_commands(commands)
 
 # =========================
 # PANEL
@@ -87,8 +106,8 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     keyboard = [
-        [InlineKeyboardButton("➕ Добавить слово", callback_data="add")],
-        [InlineKeyboardButton("➖ Удалить слово", callback_data="remove")],
+        [InlineKeyboardButton("➕ Добавить слова", callback_data="add")],
+        [InlineKeyboardButton("➖ Удалить слова", callback_data="remove")],
         [InlineKeyboardButton("📃 Список слов", callback_data="list")],
         [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
     ]
@@ -114,11 +133,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "add":
         context_state[uid] = "add"
-        await query.message.reply_text("✏️ Отправь слово для ДОБАВЛЕНИЯ")
+        await query.message.reply_text("✏️ Введи слова через запятую")
 
     elif query.data == "remove":
         context_state[uid] = "remove"
-        await query.message.reply_text("✏️ Отправь слово для УДАЛЕНИЯ")
+        await query.message.reply_text("✏️ Введи слова через запятую")
 
     elif query.data == "list":
         await query.message.reply_text("\n".join(sorted(bad_words)) or "Список пуст")
@@ -135,28 +154,31 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.message.text:
         return
 
-    user_id = update.effective_user.id
+    user = update.effective_user
+    user_id = user.id
     chat_id = update.effective_chat.id
     text_raw = update.message.text
 
     # =========================
-    # ADMIN WORD INPUT
+    # ADMIN INPUT
     # =========================
 
     if user_id == ADMIN_ID and user_id in context_state:
 
         mode = context_state[user_id]
-        word = text_raw.lower().strip()
+        words = [w.strip() for w in text_raw.lower().split(",") if w.strip()]
 
         if mode == "add":
-            bad_words.add(word)
+            for word in words:
+                bad_words.add(word)
             save_words(bad_words)
-            await update.message.reply_text(f"➕ Добавлено: {word}")
+            await update.message.reply_text(f"➕ Добавлено: {', '.join(words)}")
 
         elif mode == "remove":
-            bad_words.discard(word)
+            for word in words:
+                bad_words.discard(word)
             save_words(bad_words)
-            await update.message.reply_text(f"➖ Удалено: {word}")
+            await update.message.reply_text(f"➖ Удалено: {', '.join(words)}")
 
         del context_state[user_id]
         return
@@ -177,12 +199,21 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except:
                 pass
 
-            await context.bot.send_message(
+            username = user.username
+            name = user.first_name
+
+            if username:
+                user_text = f"@{username}"
+            else:
+                user_text = name
+
+            msg = await context.bot.send_message(
                 chat_id=chat_id,
-                text="🚫 Без мата!\n⏳ Мут на 60 секунд"
+                text=f"🚫 {user_text}, без мата!\n⏳ Мут на 60 секунд"
             )
 
-            # mute 60 sec
+            asyncio.create_task(delete_later(context, chat_id, msg.message_id, 30))
+
             await context.bot.restrict_chat_member(
                 chat_id,
                 user_id,
@@ -195,7 +226,6 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
             )
 
-            # auto unmute
             await asyncio.sleep(60)
 
             await context.bot.restrict_chat_member(
@@ -213,7 +243,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
 # =========================
-# APP START
+# START
 # =========================
 
 app = ApplicationBuilder().token(TOKEN).build()
@@ -222,4 +252,10 @@ app.add_handler(CommandHandler("panel", panel))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
 
-app.run_polling()
+# set menu + run
+async def main():
+    await set_commands(app)
+    await app.run_polling()
+
+import asyncio
+asyncio.run(main())
