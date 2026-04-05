@@ -23,10 +23,10 @@ TOKEN = os.getenv("TOKEN")
 ADMIN_ID = 388777732
 BADWORDS_FILE = "badwords.txt"
 
-print("🚀 BOT FILE STARTED")
+print("🚀 BOT START FILE")
 
 if not TOKEN:
-    print("❌ TOKEN NOT FOUND! Check Render env variables")
+    print("❌ TOKEN NOT FOUND!")
 
 # =========================
 # KEEP ALIVE SERVER (Render)
@@ -55,7 +55,7 @@ warnings = defaultdict(int)
 context_state = {}
 
 # =========================
-# LOAD WORDS
+# LOAD / SAVE WORDS
 # =========================
 
 def load_words():
@@ -72,7 +72,7 @@ def save_words(words):
 bad_words = load_words()
 
 # =========================
-# NORMALIZE TEXT
+# NORMALIZE
 # =========================
 
 def normalize(text: str):
@@ -88,8 +88,8 @@ async def delete_later(context, chat_id, message_id, delay):
     await asyncio.sleep(delay)
     try:
         await context.bot.delete_message(chat_id, message_id)
-    except Exception as e:
-        print("delete error:", e)
+    except:
+        pass
 
 # =========================
 # PANEL
@@ -139,12 +139,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text(f"📊 Нарушителей: {len(warnings)}")
 
 # =========================
-# MAIN MESSAGE HANDLER
+# MAIN LOGIC
 # =========================
 
 async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    print("📩 MESSAGE RECEIVED:", update.message.text if update.message else "NON-TEXT")
+    print("📩 MSG:", update.message.text if update.message else "NON-TEXT")
 
     if not update.message or not update.message.text:
         return
@@ -154,10 +154,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     text_raw = update.message.text
 
-    # =========================
     # ADMIN INPUT MODE
-    # =========================
-
     if user_id == ADMIN_ID and user_id in context_state:
 
         mode = context_state[user_id]
@@ -178,10 +175,7 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del context_state[user_id]
         return
 
-    # =========================
-    # ANTI-MAT CHECK
-    # =========================
-
+    # ANTI-MAT
     text = normalize(text_raw)
 
     for word in bad_words:
@@ -193,11 +187,10 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             try:
                 await update.message.delete()
-            except Exception as e:
-                print("delete msg error:", e)
+            except:
+                pass
 
-            username = user.username
-            user_tag = f"@{username}" if username else user.first_name
+            user_tag = f"@{user.username}" if user.username else user.first_name
 
             msg = await context.bot.send_message(
                 chat_id=chat_id,
@@ -218,8 +211,8 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "can_add_web_page_previews": False
                     }
                 )
-            except Exception as e:
-                print("mute error:", e)
+            except:
+                pass
 
             await asyncio.sleep(60)
 
@@ -235,13 +228,13 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         "can_add_web_page_previews": True
                     }
                 )
-            except Exception as e:
-                print("unmute error:", e)
+            except:
+                pass
 
             return
 
 # =========================
-# START BOT
+# START APP
 # =========================
 
 app = ApplicationBuilder().token(TOKEN).build()
@@ -250,12 +243,10 @@ app.add_handler(CommandHandler("panel", panel))
 app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(MessageHandler(filters.ALL, handle_all))
 
-async def main():
-    print("🤖 BOT IS STARTING POLLING...")
-    await app.bot.set_my_commands([
-        BotCommand("panel", "Открыть панель")
-    ])
-    await app.run_polling()
+print("🤖 BOT IS STARTING...")
 
-import asyncio
-asyncio.run(main())
+app.bot.set_my_commands([
+    BotCommand("panel", "Открыть панель")
+])
+
+app.run_polling()
