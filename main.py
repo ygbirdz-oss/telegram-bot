@@ -17,7 +17,7 @@ from telegram.ext import (
 # =========================
 # TOKEN (ВСТАВЬ СЮДА)
 # =========================
-TOKEN = "8706190944:AAH_RAn8lYi42bNPpp-TSWfzXkmwwTJZ-L8"
+TOKEN = ""
 
 ADMIN_ID = 388777732
 BADWORDS_FILE = "badwords.txt"
