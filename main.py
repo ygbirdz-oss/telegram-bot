@@ -1,96 +1,193 @@
-import os
-import json
 import asyncio
-from telegram import Update
-from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
+import re
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from collections import defaultdict
 
-TOKEN = os.getenv("BOT_TOKEN")
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatPermissions
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
 
-DATA_FILE = "bad_words.json"
+# =========================
+# TOKEN (ВСТАВЬ СЮДА)
+# =========================
+TOKEN = "8706190944:AAFBkQgWBsixnDGQ5CDtcKcdFKyMBB1xvrU"
 
+ADMIN_ID = 388777732
+BADWORDS_FILE = "badwords.txt"
+
+# =========================
+# KEEP ALIVE
+# =========================
+def run_web():
+    port = 10000
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
+threading.Thread(target=run_web, daemon=True).start()
+
+# =========================
+# DATA
+# =========================
+bad_words = set()
+warnings = defaultdict(int)
+context_state = {}
 
 def load_words():
-    if not os.path.exists(DATA_FILE):
-        return []
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        with open(BADWORDS_FILE, "r", encoding="utf-8") as f:
+            return set(line.strip().lower() for line in f if line.strip())
     except:
-        return []
-
+        return set()
 
 def save_words(words):
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(words, f, ensure_ascii=False, indent=2)
-
+    with open(BADWORDS_FILE, "w", encoding="utf-8") as f:
+        for w in words:
+            f.write(w + "\n")
 
 bad_words = load_words()
 
-
-def is_bad(text: str):
+# =========================
+# NORMALIZE
+# =========================
+def normalize(text: str):
     text = text.lower()
-    return any(word in text for word in bad_words)
+    text = re.sub(r"[^a-zа-яё0-9]", "", text)
+    return text
 
-
-async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    msg = update.message
-    if not msg or not msg.text:
+# =========================
+# PANEL
+# =========================
+async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
 
-    text = msg.text.lower()
+    keyboard = [
+        [InlineKeyboardButton("➕ Добавить слово", callback_data="add")],
+        [InlineKeyboardButton("➖ Удалить слово", callback_data="remove")],
+        [InlineKeyboardButton("📃 Список слов", callback_data="list")],
+        [InlineKeyboardButton("📊 Статистика", callback_data="stats")],
+    ]
 
-    if is_bad(text):
-        user = msg.from_user
-        mention = f"@{user.username}" if user.username else user.first_name
+    await update.message.reply_text(
+        "🎛 Панель управления",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-        try:
-            await msg.delete()
-        except:
-            pass
+# =========================
+# BUTTONS
+# =========================
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-        sent = await msg.reply_text(
-            f"🚫 {mention} без мата!\n⏳ Мут на 60 секунд"
-        )
-
-        await asyncio.sleep(60)
-
-        try:
-            await sent.delete()
-        except:
-            pass
-
-
-async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global bad_words
-
-    if not context.args:
-        await update.message.reply_text("Используй: /add слово")
+    if query.from_user.id != ADMIN_ID:
         return
 
-    word = context.args[0].lower()
+    uid = query.from_user.id
 
-    if word not in bad_words:
-        bad_words.append(word)
-        save_words(bad_words)
+    if query.data == "add":
+        context_state[uid] = "add"
+        await query.message.reply_text("✏️ Отправь слово для ДОБАВЛЕНИЯ")
 
-    await update.message.reply_text(f"Добавлено: {word}")
+    elif query.data == "remove":
+        context_state[uid] = "remove"
+        await query.message.reply_text("✏️ Отправь слово для УДАЛЕНИЯ")
 
+    elif query.data == "list":
+        await query.message.reply_text("\n".join(sorted(bad_words)) or "Список пуст")
 
-def main():
-    if not TOKEN:
-        print("BOT_TOKEN not found in environment variables")
+    elif query.data == "stats":
+        await query.message.reply_text(f"📊 Нарушителей: {len(warnings)}")
+
+# =========================
+# MAIN LOGIC
+# =========================
+async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not update.message or not update.message.text:
         return
 
-    app = Application.builder().token(TOKEN).build()
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    text_raw = update.message.text
 
-    app.add_handler(CommandHandler("add", add_word))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+    # ADMIN MODE
+    if user_id == ADMIN_ID and user_id in context_state:
 
-    print("BOT STARTED")
+        mode = context_state[user_id]
+        word = text_raw.lower().strip()
 
-    # 🔥 FIX: стабильный запуск для Render
-    app.run_polling(drop_pending_updates=True)
+        if mode == "add":
+            bad_words.add(word)
+            save_words(bad_words)
+            await update.message.reply_text(f"➕ Добавлено: {word}")
 
+        elif mode == "remove":
+            bad_words.discard(word)
+            save_words(bad_words)
+            await update.message.reply_text(f"➖ Удалено: {word}")
 
-if __name__ == "__main__":
-    main()
+        del context_state[user_id]
+        return
+
+    # ANTI-MAT
+    text = normalize(text_raw)
+
+    for word in bad_words:
+        if word in text:
+
+            warnings[user_id] += 1
+
+            try:
+                await update.message.delete()
+            except:
+                pass
+
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="🚫 Без мата!\n⏳ Мут на 60 секунд"
+            )
+
+            # mute
+            await context.bot.restrict_chat_member(
+                chat_id,
+                user_id,
+                permissions=ChatPermissions(can_send_messages=False)
+            )
+
+            await asyncio.sleep(60)
+
+            # unmute
+            await context.bot.restrict_chat_member(
+                chat_id,
+                user_id,
+                permissions=ChatPermissions(can_send_messages=True)
+            )
+
+            return
+
+# =========================
+# START
+# =========================
+app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("panel", panel))
+app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
+
+print("BOT STARTED")
+app.run_polling()
