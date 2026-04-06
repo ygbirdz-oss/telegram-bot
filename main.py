@@ -2,28 +2,13 @@ import os
 import json
 import asyncio
 from telegram import Update
-from telegram.ext import (
-    Application,
-    MessageHandler,
-    CommandHandler,
-    ContextTypes,
-    filters
-)
+from telegram.ext import Application, MessageHandler, CommandHandler, ContextTypes, filters
 
-# -----------------------
-# TOKEN (Render ENV)
-# -----------------------
 TOKEN = os.getenv("BOT_TOKEN")
 
-# -----------------------
-# DATA FILE (persist)
-# -----------------------
 DATA_FILE = "bad_words.json"
 
 
-# -----------------------
-# LOAD / SAVE WORDS
-# -----------------------
 def load_words():
     if not os.path.exists(DATA_FILE):
         return []
@@ -42,27 +27,19 @@ def save_words(words):
 bad_words = load_words()
 
 
-# -----------------------
-# CHECK BAD WORDS
-# -----------------------
 def is_bad(text: str):
     text = text.lower()
     return any(word in text for word in bad_words)
 
 
-# -----------------------
-# MESSAGE HANDLER
-# -----------------------
 async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-
     if not msg or not msg.text:
         return
 
     text = msg.text.lower()
 
     if is_bad(text):
-
         user = msg.from_user
         mention = f"@{user.username}" if user.username else user.first_name
 
@@ -75,7 +52,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🚫 {mention} без мата!\n⏳ Мут на 60 секунд"
         )
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(60)
 
         try:
             await sent.delete()
@@ -83,9 +60,6 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
 
-# -----------------------
-# ADD WORD COMMAND
-# -----------------------
 async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global bad_words
 
@@ -102,9 +76,6 @@ async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"Добавлено: {word}")
 
 
-# -----------------------
-# START BOT
-# -----------------------
 def main():
     if not TOKEN:
         print("BOT_TOKEN not found in environment variables")
@@ -116,7 +87,9 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
     print("BOT STARTED")
-    app.run_polling()
+
+    # 🔥 FIX: стабильный запуск для Render
+    app.run_polling(drop_pending_updates=True)
 
 
 if __name__ == "__main__":
