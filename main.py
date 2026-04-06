@@ -1,61 +1,123 @@
+import os
+import json
 import asyncio
-import logging
-import sys
+from telegram import Update
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    CommandHandler,
+    ContextTypes,
+    filters
+)
 
-from aiogram import Bot, Dispatcher, types
+# -----------------------
+# TOKEN (Render ENV)
+# -----------------------
+TOKEN = os.getenv("BOT_TOKEN")
 
-from config import BOT_TOKEN
-from storage.db import init_db
-from storage.words import load_words
+# -----------------------
+# DATA FILE (persist)
+# -----------------------
+DATA_FILE = "bad_words.json"
 
-init_db()
+
+# -----------------------
+# LOAD / SAVE WORDS
+# -----------------------
+def load_words():
+    if not os.path.exists(DATA_FILE):
+        return []
+    try:
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return []
+
+
+def save_words(words):
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(words, f, ensure_ascii=False, indent=2)
+
+
 bad_words = load_words()
 
-print("🔥 BAD WORDS LOADED:", len(bad_words))
 
-
-def is_bad(text: str, words: set):
+# -----------------------
+# CHECK BAD WORDS
+# -----------------------
+def is_bad(text: str):
     text = text.lower()
-    return any(w in text for w in words)
+    return any(word in text for word in bad_words)
 
 
-async def handle_message(message: types.Message):
-    global bad_words
+# -----------------------
+# MESSAGE HANDLER
+# -----------------------
+async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = update.message
 
-    if not message.text:
+    if not msg or not msg.text:
         return
 
-    if is_bad(message.text, bad_words):
+    text = msg.text.lower()
 
-        username = message.from_user.username
-        mention = f"@{username}" if username else message.from_user.full_name
+    if is_bad(text):
+
+        user = msg.from_user
+        mention = f"@{user.username}" if user.username else user.first_name
 
         try:
-            await message.delete()
+            await msg.delete()
         except:
             pass
 
-        await message.answer(
-            f"🚫 {mention} человека к которому он обращается, без мата!\n⏳ Мут на 60 секунд"
+        sent = await msg.reply_text(
+            f"🚫 {mention} без мата!\n⏳ Мут на 60 секунд"
         )
 
+        await asyncio.sleep(30)
 
-async def main():
-    print("🔥 BOT STARTED")
+        try:
+            await sent.delete()
+        except:
+            pass
 
-    logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stdout
-    )
 
-    bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
+# -----------------------
+# ADD WORD COMMAND
+# -----------------------
+async def add_word(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global bad_words
 
-    dp.message.register(handle_message)
+    if not context.args:
+        await update.message.reply_text("Используй: /add слово")
+        return
 
-    await dp.start_polling(bot)
+    word = context.args[0].lower()
+
+    if word not in bad_words:
+        bad_words.append(word)
+        save_words(bad_words)
+
+    await update.message.reply_text(f"Добавлено: {word}")
+
+
+# -----------------------
+# START BOT
+# -----------------------
+def main():
+    if not TOKEN:
+        print("BOT_TOKEN not found in environment variables")
+        return
+
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("add", add_word))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
+
+    print("BOT STARTED")
+    app.run_polling()
 
 
 if __name__ == "__main__":
-    print("🚀 STARTING SCRIPT")
-    asyncio.run(main())
+    main()
