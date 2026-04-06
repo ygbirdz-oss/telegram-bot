@@ -1,6 +1,6 @@
 import os
-import asyncio
 import re
+import asyncio
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from collections import defaultdict
@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 # =========================
-# TOKEN (Render ENV)
+# TOKEN
 # =========================
 TOKEN = os.getenv("TOKEN")
 
@@ -62,7 +62,7 @@ def save_words(words):
 bad_words = load_words()
 
 # =========================
-# NORMALIZE TEXT
+# NORMALIZE
 # =========================
 def normalize(text: str):
     text = text.lower()
@@ -89,7 +89,7 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # =========================
-# BUTTON HANDLER
+# CALLBACKS
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -163,21 +163,22 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 text="🚫 Без мата!\n⏳ Мут на 60 секунд"
             )
 
-            # mute
-            await context.bot.restrict_chat_member(
-                chat_id,
-                user_id,
-                permissions=ChatPermissions(can_send_messages=False)
-            )
+            try:
+                await context.bot.restrict_chat_member(
+                    chat_id,
+                    user_id,
+                    permissions=ChatPermissions(can_send_messages=False)
+                )
 
-            await asyncio.sleep(60)
+                await asyncio.sleep(60)
 
-            # unmute
-            await context.bot.restrict_chat_member(
-                chat_id,
-                user_id,
-                permissions=ChatPermissions(can_send_messages=True)
-            )
+                await context.bot.restrict_chat_member(
+                    chat_id,
+                    user_id,
+                    permissions=ChatPermissions(can_send_messages=True)
+                )
+            except:
+                pass
 
             return
 
