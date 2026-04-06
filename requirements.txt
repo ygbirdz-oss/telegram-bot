@@ -1,1 +1,2 @@
-python-telegram-bot
+aiogram==3.4.1
+aiohttp
