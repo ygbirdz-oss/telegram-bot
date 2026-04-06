@@ -1,3 +1,4 @@
+import os
 import asyncio
 import re
 import threading
@@ -15,18 +16,18 @@ from telegram.ext import (
 )
 
 # =========================
-# TOKEN (ВСТАВЬ СЮДА)
+# TOKEN (Render ENV)
 # =========================
-TOKEN = ""
+TOKEN = os.getenv("TOKEN")
 
 ADMIN_ID = 388777732
 BADWORDS_FILE = "badwords.txt"
 
 # =========================
-# KEEP ALIVE
+# KEEP ALIVE (Render)
 # =========================
 def run_web():
-    port = 10000
+    port = int(os.environ.get("PORT", 10000))
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
@@ -61,7 +62,7 @@ def save_words(words):
 bad_words = load_words()
 
 # =========================
-# NORMALIZE
+# NORMALIZE TEXT
 # =========================
 def normalize(text: str):
     text = text.lower()
@@ -88,7 +89,7 @@ async def panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # =========================
-# BUTTONS
+# BUTTON HANDLER
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -183,11 +184,19 @@ async def handle_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # START
 # =========================
-app = ApplicationBuilder().token(TOKEN).build()
+def main():
+    if not TOKEN:
+        print("❌ TOKEN not found in ENV")
+        return
 
-app.add_handler(CommandHandler("panel", panel))
-app.add_handler(CallbackQueryHandler(button_handler))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
+    app = ApplicationBuilder().token(TOKEN).build()
 
-print("BOT STARTED")
-app.run_polling()
+    app.add_handler(CommandHandler("panel", panel))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_all))
+
+    print("✅ BOT STARTED")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
